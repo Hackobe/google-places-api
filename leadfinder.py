@@ -154,11 +154,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-api_key = st.text_input(
-    "Google Places API Key",
-    type="password",
-    placeholder="Wklej swój klucz API..."
-)
+api_key = st.secrets["GOOGLE_API_KEY"]
 
 col1, col2, col3, col4 = st.columns([1.1, 1.1, 0.9, 0.9])
 
