@@ -150,59 +150,48 @@ st.markdown("""
 <div class="hero">
 <div class="badge">ALBAMA WEB · Lead Finder</div>
 <div class="hero-title">Google Maps <span>Lead Finder</span></div>
-<div class="hero-desc">Wyszukuj lokalne firmy z Google Places API, filtruj potencjalne okazje sprzedażowei eksportuj gotową bazę leadów do Excela.</div>
+<div class="hero-desc">Wyszukuj lokalne firmy z Google Places API, filtruj potencjalne okazje sprzedażowe i eksportuj gotową bazę leadów do Excela.</div>
 </div>
 """, unsafe_allow_html=True)
 
-api_key = st.secrets["GOOGLE_API_KEY"]
+api_key = st.secrets.get("GOOGLE_API_KEY", "")
+
+if not api_key:
+    st.error("Brak GOOGLE_API_KEY w Streamlit Secrets.")
+    st.stop()
 
 col1, col2, col3, col4 = st.columns([1.1, 1.1, 0.9, 0.9])
 
 with col1:
-    branza = st.text_input(
-        "Branża",
-        value="barber"
-    )
+    branza = st.text_input("Branża", value="barber")
 
 with col2:
-    miasto = st.text_input(
-        "Miasto",
-        value="Warszawa"
-    )
+    miasto = st.text_input("Miasto", value="Warszawa")
 
 with col3:
-    min_opinie_input = st.text_input(
-        "Minimalna liczba opinii",
-        value="0"
-    )
+    min_opinie_input = st.text_input("Minimalna liczba opinii", value="0")
 
     try:
         min_opinie = int(min_opinie_input)
-    except:
+    except ValueError:
         min_opinie = 0
 
 with col4:
-    liczba_leadow_input = st.text_input(
-        "Liczba leadów",
-        value="20"
-    )
+    liczba_leadow_input = st.text_input("Liczba leadów", value="20")
 
     try:
         liczba_leadow = int(liczba_leadow_input)
-    except:
+    except ValueError:
         liczba_leadow = 20
 
     liczba_leadow = max(1, min(20, liczba_leadow))
 
-tylko_bez_strony = st.checkbox(
-    "Pokaż tylko firmy bez strony www"
-)
+tylko_bez_strony = st.checkbox("Pokaż tylko firmy bez strony www")
 
 search_button = st.button("Szukaj leadów")
 
 
 def search_places(api_key, query, liczba_leadow):
-
     url = "https://places.googleapis.com/v1/places:searchText"
 
     headers = {
@@ -225,11 +214,7 @@ def search_places(api_key, query, liczba_leadow):
         "maxResultCount": liczba_leadow
     }
 
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload
-    )
+    response = requests.post(url, headers=headers, json=payload)
 
     if response.status_code != 200:
         st.error("Błąd API")
@@ -237,19 +222,13 @@ def search_places(api_key, query, liczba_leadow):
         return []
 
     data = response.json()
-
     return data.get("places", [])
 
 
 def convert_to_excel(df):
-
     output = BytesIO()
 
-    with pd.ExcelWriter(
-        output,
-        engine="openpyxl"
-    ) as writer:
-
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(
             writer,
             index=False,
@@ -260,134 +239,93 @@ def convert_to_excel(df):
 
 
 if search_button:
+    query = f"{branza} {miasto}"
 
-    if not api_key:
+    with st.spinner("Szukam leadów w Google Maps..."):
+        places = search_places(api_key, query, liczba_leadow)
 
-        st.warning("Wpisz najpierw API Key.")
+    results = []
+
+    for place in places:
+        name = place.get("displayName", {}).get("text", "")
+        address = place.get("formattedAddress", "")
+        phone = place.get("nationalPhoneNumber", "")
+        website = place.get("websiteUri", "")
+        rating = place.get("rating", "")
+        reviews = place.get("userRatingCount", 0)
+        maps = place.get("googleMapsUri", "")
+
+        if reviews < min_opinie:
+            continue
+
+        if tylko_bez_strony and website:
+            continue
+
+        results.append({
+            "Branża": branza,
+            "Miasto": miasto,
+            "Nazwa firmy": name,
+            "Adres": address,
+            "Telefon": phone,
+            "Strona www": website,
+            "Ocena": rating,
+            "Liczba opinii": reviews,
+            "Google Maps": maps,
+            "Status": "Nie dzwonione",
+            "Notatka": ""
+        })
+
+    if results:
+        df = pd.DataFrame(results)
+
+        total = len(df)
+        bez_www = df["Strona www"].eq("").sum()
+        z_tel = df["Telefon"].ne("").sum()
+
+        st.markdown("## Wyniki")
+
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            st.markdown(f"""
+            <div class="info-card">
+                <strong>{total}</strong>
+                <span>Znalezione leady</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_b:
+            st.markdown(f"""
+            <div class="info-card">
+                <strong>{bez_www}</strong>
+                <span>Firmy bez strony www</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_c:
+            st.markdown(f"""
+            <div class="info-card">
+                <strong>{z_tel}</strong>
+                <span>Leady z numerem telefonu</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("### Lista firm")
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            height=500
+        )
+
+        excel_file = convert_to_excel(df)
+
+        st.download_button(
+            label="Pobierz bazę leadów Excel",
+            data=excel_file,
+            file_name=f"leady_{branza}_{miasto}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     else:
-
-        query = f"{branza} {miasto}"
-
-        with st.spinner("Szukam leadów w Google Maps..."):
-
-            places = search_places(
-                api_key,
-                query,
-                liczba_leadow
-            )
-
-        results = []
-
-        for place in places:
-
-            name = place.get(
-                "displayName",
-                {}
-            ).get("text", "")
-
-            address = place.get(
-                "formattedAddress",
-                ""
-            )
-
-            phone = place.get(
-                "nationalPhoneNumber",
-                ""
-            )
-
-            website = place.get(
-                "websiteUri",
-                ""
-            )
-
-            rating = place.get(
-                "rating",
-                ""
-            )
-
-            reviews = place.get(
-                "userRatingCount",
-                0
-            )
-
-            maps = place.get(
-                "googleMapsUri",
-                ""
-            )
-
-            if reviews < min_opinie:
-                continue
-
-            if tylko_bez_strony and website:
-                continue
-
-            results.append({
-                "Branża": branza,
-                "Miasto": miasto,
-                "Nazwa firmy": name,
-                "Adres": address,
-                "Telefon": phone,
-                "Strona www": website,
-                "Ocena": rating,
-                "Liczba opinii": reviews,
-                "Google Maps": maps,
-                "Status": "Nie dzwonione",
-                "Notatka": ""
-            })
-
-        if results:
-
-            df = pd.DataFrame(results)
-
-            total = len(df)
-            bez_www = df["Strona www"].eq("").sum()
-            z_tel = df["Telefon"].ne("").sum()
-
-            st.markdown("## Wyniki")
-
-            col_a, col_b, col_c = st.columns(3)
-
-            with col_a:
-                st.markdown(f"""
-                <div class="info-card">
-                    <strong>{total}</strong>
-                    <span>Znalezione leady</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with col_b:
-                st.markdown(f"""
-                <div class="info-card">
-                    <strong>{bez_www}</strong>
-                    <span>Firmy bez strony www</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with col_c:
-                st.markdown(f"""
-                <div class="info-card">
-                    <strong>{z_tel}</strong>
-                    <span>Leady z numerem telefonu</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.markdown("### Lista firm")
-
-            st.dataframe(
-                df,
-                use_container_width=True,
-                height=500
-            )
-
-            excel_file = convert_to_excel(df)
-
-            st.download_button(
-                label="Pobierz bazę leadów Excel",
-                data=excel_file,
-                file_name=f"leady_{branza}_{miasto}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        else:
-            st.warning("Brak wyników dla tych filtrów.")
+        st.warning("Brak wyników dla tych filtrów.")
